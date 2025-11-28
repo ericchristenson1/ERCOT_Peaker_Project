@@ -66,6 +66,9 @@ def merge_load_and_weather(
     tz: Optional[str] = None,
     lag_hours: List[int] = [1, 24, 168],
     base_temp_f: float = 65.0,
+    solar_csv: Optional[str] = None,
+    wind_csv: Optional[str] = None,
+    lmp_csv: Optional[str] = None,
     save_path: Optional[str] = None,
 ) -> pd.DataFrame:
     """Read load and weather CSVs, merge on hourly datetime, and add features.
@@ -81,10 +84,16 @@ def merge_load_and_weather(
 
     Returns
     - pandas DataFrame with merged data and added features
+    Note: optional `solar_csv`, `wind_csv`, and `lmp_csv` are merged (as-of) on the
+    same datetime column if provided. They are merged after weather so their numeric
+    columns are available for ramp calculations.
     """
     # Read files
     load = pd.read_csv(load_csv)
     weather = pd.read_csv(weather_csv)
+    solar = pd.read_csv(solar_csv) if solar_csv else None
+    wind = pd.read_csv(wind_csv) if wind_csv else None
+    lmp = pd.read_csv(lmp_csv) if lmp_csv else None
 
     # Infer datetime column if not provided
     dt_col = datetime_col or _infer_datetime_col(load) or _infer_datetime_col(weather)
@@ -101,6 +110,31 @@ def merge_load_and_weather(
     # Standardize column name
     load = load.rename(columns={dt_col: 'datetime'})
     weather = weather.rename(columns={dt_col: 'datetime'})
+    if solar is not None:
+        if dt_col in solar.columns:
+            solar = solar.rename(columns={dt_col: 'datetime'})
+        else:
+            # try infer
+            solar = solar.rename(columns={_infer_datetime_col(solar): 'datetime'}) if _infer_datetime_col(solar) else solar
+        solar['datetime'] = pd.to_datetime(solar['datetime'])
+        if tz:
+            solar['datetime'] = solar['datetime'].dt.tz_localize(tz, ambiguous='infer', nonexistent='shift_forward')
+    if wind is not None:
+        if dt_col in wind.columns:
+            wind = wind.rename(columns={dt_col: 'datetime'})
+        else:
+            wind = wind.rename(columns={_infer_datetime_col(wind): 'datetime'}) if _infer_datetime_col(wind) else wind
+        wind['datetime'] = pd.to_datetime(wind['datetime'])
+        if tz:
+            wind['datetime'] = wind['datetime'].dt.tz_localize(tz, ambiguous='infer', nonexistent='shift_forward')
+    if lmp is not None:
+        if dt_col in lmp.columns:
+            lmp = lmp.rename(columns={dt_col: 'datetime'})
+        else:
+            lmp = lmp.rename(columns={_infer_datetime_col(lmp): 'datetime'}) if _infer_datetime_col(lmp) else lmp
+        lmp['datetime'] = pd.to_datetime(lmp['datetime'])
+        if tz:
+            lmp['datetime'] = lmp['datetime'].dt.tz_localize(tz, ambiguous='infer', nonexistent='shift_forward')
 
     # Merge on datetime (hourly) -- inner join to keep aligned hours
     df = pd.merge_asof(
@@ -110,6 +144,35 @@ def merge_load_and_weather(
         direction='nearest',
         tolerance=pd.Timedelta('30m'),
     )
+
+    # Merge optional datasets (as-of) to align to the same hourly datetime
+    if solar is not None:
+        df = pd.merge_asof(
+            df.sort_values('datetime'),
+            solar.sort_values('datetime'),
+            on='datetime',
+            direction='nearest',
+            tolerance=pd.Timedelta('30m'),
+            suffixes=(None, '_solar'),
+        )
+    if wind is not None:
+        df = pd.merge_asof(
+            df.sort_values('datetime'),
+            wind.sort_values('datetime'),
+            on='datetime',
+            direction='nearest',
+            tolerance=pd.Timedelta('30m'),
+            suffixes=(None, '_wind'),
+        )
+    if lmp is not None:
+        df = pd.merge_asof(
+            df.sort_values('datetime'),
+            lmp.sort_values('datetime'),
+            on='datetime',
+            direction='nearest',
+            tolerance=pd.Timedelta('30m'),
+            suffixes=(None, '_lmp'),
+        )
 
     # Ensure sorted by time
     df = df.sort_values('datetime').reset_index(drop=True)
@@ -214,7 +277,22 @@ if __name__ == '__main__':
     p = argparse.ArgumentParser()
     p.add_argument('load_csv')
     p.add_argument('weather_csv')
+    p.add_argument('--datetime-col', default=None, help='datetime column name if different between files')
     p.add_argument('--out', default=None)
     args = p.parse_args()
-    df = merge_load_and_weather(args.load_csv, args.weather_csv, save_path=args.out)
+
+    # Explicit CSVs to merge (hard-coded)
+    solar_csv_path = 'clean_data/ercot_solar_actuals_allzones_2023_2024.csv'
+    wind_csv_path = 'clean_data/ercot_wind_actuals_hourly_2023_2024.csv'
+    lmp_csv_path = 'clean_data/LMP_2023_2024_Hubs.csv'
+
+    df = merge_load_and_weather(
+        args.load_csv,
+        args.weather_csv,
+        datetime_col=args.datetime_col,
+        solar_csv=solar_csv_path,
+        wind_csv=wind_csv_path,
+        lmp_csv=lmp_csv_path,
+        save_path=args.out,
+    )
     print('Merged rows:', len(df))

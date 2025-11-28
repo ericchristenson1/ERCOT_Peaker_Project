@@ -75,21 +75,18 @@ def clean_weather_data(df):
 
 if __name__ == "__main__":
     files = [
-        "data/2021_DFW.csv",
-        "data/2022_DFW.csv",
-        "data/2023_DFW.csv",
-        "data/2024_DFW.csv",
+        "data/2025_DFW.csv",
     ]
     
     combined_weather_df = combine_weather_data(files)
     print(combined_weather_df.head())
 
     # Save the csv to data/combined_DFW_weather.csv
-    combined_weather_df.to_csv("data/combined_DFW_weather.csv", index=False)
+    combined_weather_df.to_csv("data/2025_DFW_weather.csv", index=False)
 
     # Clean the combined data
     cleaned_df = clean_weather_data(combined_weather_df)
     print(cleaned_df.head())
 
     # Save the cleaned data to clean_data/cleaned_DFW_weather.csv
-    cleaned_df.to_csv("clean_data/cleaned_DFW_weather.csv", index=False)
+    cleaned_df.to_csv("clean_data/cleaned_DFW_weather_2025.csv", index=False)
